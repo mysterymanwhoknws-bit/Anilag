@@ -1,2 +1,3 @@
-playwright==1.41.0
-asyncio
+yt-dlp
+requests
+beautifulsoup4
