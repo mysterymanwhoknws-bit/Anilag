@@ -3,79 +3,62 @@ const { spawn } = require('child_process');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static('public')); // For images/css if you add them
+// Helper to run Python Scraper
+const callPython = (mode, url) => {
+    return new Promise((resolve) => {
+        const py = spawn('python3', ['scraper.py', mode, url]);
+        let data = "";
+        py.stdout.on('data', (chunk) => data += chunk.toString());
+        py.on('close', () => resolve(data.trim()));
+    });
+};
 
-// --- 1. HOME PAGE (The Grid View) ---
 app.get('/', (req, res) => {
-    res.send(`
-        <body style="background:#0b0b0b; color:white; font-family:sans-serif; margin:0; padding:20px;">
-            <header style="padding:20px; border-bottom:1px solid #222; display:flex; justify-content:space-between; align-items:center;">
-                <h1 style="color:#ffdd95; margin:0;">Anilag.to</h1>
-                <input placeholder="Search anime..." style="background:#222; border:none; color:white; padding:10px; border-radius:20px; width:300px;">
-            </header>
-            
-            <h2 style="margin-top:30px;">Trending Now</h2>
-            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:20px; padding:20px 0;">
-                ${renderCard("One Piece", "https://hianime.to/watch/one-piece-100", "https://cdn.noitatnemucod.net/thumbnail/300x400/100/bcd84737a3de13946efb72e92c64b598.jpg")}
-                ${renderCard("Naruto", "https://hianime.to/watch/naruto-677", "https://cdn.noitatnemucod.net/thumbnail/300x400/100/1d624a682bc3394c8b3d6b0559f515e2.jpg")}
-            </div>
-        </body>
-    `);
+    res.send(`<body style="background:#0b0b0b;color:white;font-family:sans-serif;text-align:center;padding:50px;">
+        <h1 style="color:#ffdd95;">ANILAG STREAM</h1>
+        <form action="/watch" method="GET">
+            <input name="url" placeholder="Paste HiAnime URL" style="padding:10px;width:300px;">
+            <button type="submit" style="padding:10px;background:#ffdd95;border:none;">Watch</button>
+        </form>
+    </body>`);
 });
 
-function renderCard(title, url, img) {
-    return `
-        <div style="background:#1a1a1a; border-radius:8px; overflow:hidden; transition: 0.3s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-            <a href="/watch?url=${encodeURIComponent(url)}" style="text-decoration:none; color:white;">
-                <img src="${img}" style="width:100%; height:250px; object-fit:cover;">
-                <div style="padding:10px; font-weight:bold;">${title}</div>
-            </a>
+app.get('/watch', async (req, res) => {
+    const url = req.query.url;
+    const episodesJson = await callPython('episodes', url);
+    const episodes = JSON.parse(episodesJson || "[]");
+
+    res.send(`
+    <body style="background:#000;color:white;font-family:sans-serif;margin:0;display:flex;">
+        <div style="flex:3;display:flex;flex-direction:column;">
+            <div style="width:100%;aspect-ratio:16/9;background:#111;">
+                <iframe id="v-player" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
+            </div>
+            <div style="padding:20px;">
+                <h2 style="color:#ffdd95;">Now Playing</h2>
+                <p>Enjoy your ad-free stream.</p>
+            </div>
         </div>
-    `;
-}
-
-// --- 2. THE WATCH PAGE (The Player) ---
-app.get('/watch', (req, res) => {
-    const target = req.query.url;
-    res.send(`
-        <body style="background:#000; color:white; font-family:sans-serif; margin:0; text-align:center;">
-            <div style="padding:20px; background:#111;">
-                <a href="/" style="color:#ffdd95; text-decoration:none;">← Back to Home</a>
+        <div style="flex:1;background:#111;padding:20px;height:100vh;overflow-y:auto;border-left:1px solid #333;">
+            <h3>Episodes</h3>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;">
+                ${episodes.map(ep => `<button onclick="play('${url}')" style="padding:10px;background:#222;color:white;border:none;cursor:pointer;">${ep.number}</button>`).join('')}
             </div>
-            
-            <div id="player-status" style="padding:50px; font-size:20px;">
-                <div class="spinner"></div> 
-                <p>Scraping secure servers for: <b>${target}</b></p>
-                <small style="color:#666;">This may take 10-15 seconds...</small>
-            </div>
-
-            <div id="video-container" style="display:none; width:90%; max-width:1000px; margin:20px auto; aspect-ratio:16/9; background:#000;">
-                <iframe id="video-frame" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
-            </div>
-
-            <script>
-                fetch('/api/scrape?url=${encodeURIComponent(target)}')
-                    .then(res => res.json())
-                    .then(data => {
-                        if(data.success) {
-                            document.getElementById('player-status').style.display = 'none';
-                            document.getElementById('video-container').style.display = 'block';
-                            document.getElementById('video-frame').src = data.data;
-                        } else {
-                            document.getElementById('player-status').innerHTML = "Failed to load video.";
-                        }
-                    });
-            </script>
-        </body>
-    `);
+        </div>
+        <script>
+            function play(link) {
+                fetch('/api/link?url=' + encodeURIComponent(link))
+                    .then(r => r.text())
+                    .then(src => document.getElementById('v-player').src = src);
+            }
+            if(${episodes.length} > 0) play('${url}');
+        </script>
+    </body>`);
 });
 
-// --- 3. THE SCRAPER API (Remains the same as previous) ---
-app.get('/api/scrape', (req, res) => {
-    const pythonProcess = spawn('python3', ['-u', 'scraper.py', req.query.url]);
-    let output = "";
-    pythonProcess.stdout.on('data', (data) => output += data.toString());
-    pythonProcess.on('close', () => res.json({ success: true, data: output.trim() }));
+app.get('/api/link', async (req, res) => {
+    const link = await callPython('video', req.query.url);
+    res.send(link);
 });
 
 app.listen(PORT, '0.0.0.0');
