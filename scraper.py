@@ -1,30 +1,43 @@
 import sys
-import asyncio
-from playwright.async_api import async_playwright
+import json
+import yt_dlp
+import requests
+from bs4 import BeautifulSoup
 
-async def get_anime_link(url):
-    async with async_playwright() as p:
-        # headless=True is required for cloud hosting
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+def get_episodes(url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
         
+        # This selector depends on the specific site layout
+        # HiAnime usually lists episodes in a specific div
+        ep_elements = soup.select('.ss-list .ssl-item')
+        episodes = []
+        for ep in ep_elements:
+            episodes.append({
+                "number": ep.get('data-number'),
+                "id": ep.get('data-id'),
+                "title": ep.text.strip()
+            })
+        return episodes
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_video(url):
+    ydl_opts = {'quiet': True, 'format': 'best'}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
-            await page.goto(url, timeout=60000)
-            # Wait for the iframe or video tag to load
-            await page.wait_for_selector('iframe', timeout=10000)
-            
-            # Simple extraction logic
-            iframe = await page.query_selector('iframe')
-            src = await iframe.get_attribute('src')
-            
-            # Print ONLY the result so Node.js can read it
-            print(src)
+            info = ydl.extract_info(url, download=False)
+            return info.get('url')
         except Exception as e:
-            print(f"Error: {str(e)}")
-        finally:
-            await browser.close()
+            return f"Error: {str(e)}"
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        target_url = sys.argv[1]
-        asyncio.run(get_anime_link(target_url))
+    mode = sys.argv[1] # "video" or "episodes"
+    target = sys.argv[2]
+    
+    if mode == "episodes":
+        print(json.dumps(get_episodes(target)))
+    else:
+        print(get_video(target))
