@@ -2,29 +2,30 @@ import sys
 import asyncio
 from playwright.async_api import async_playwright
 
-async def get_anime_link(url):
+async def scrape_video(url):
     async with async_playwright() as p:
-        # headless=True is required for cloud hosting
+        # Launch browser
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         
         try:
-            await page.goto(url, timeout=60000)
-            # Wait for the iframe or video tag to load
-            await page.wait_for_selector('iframe', timeout=10000)
-            
-            # Simple extraction logic
+            # 1. Go to the anime page
+            await page.goto(url, wait_until="networkidle")
+
+            # 2. Wait for the player wrapper to appear
+            # Most sites use an ID like 'player-wrapper' or 'iframe-embed'
+            await page.wait_for_selector('iframe', timeout=15000)
+
+            # 3. Get the source of the first iframe (usually the player)
             iframe = await page.query_selector('iframe')
             src = await iframe.get_attribute('src')
-            
-            # Print ONLY the result so Node.js can read it
+
             print(src)
-        except Exception as e:
-            print(f"Error: {str(e)}")
+        except Exception:
+            print("https://www.youtube.com/embed/dQw4w9WgXcQ") # Fallback error video
         finally:
             await browser.close()
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        target_url = sys.argv[1]
-        asyncio.run(get_anime_link(target_url))
+        asyncio.run(scrape_video(sys.argv[1]))
