@@ -1,90 +1,64 @@
 const express = require('express');
 const { spawn } = require('child_process');
-const path = require('path');
 const app = express();
-
-// Render uses the PORT environment variable. Default to 3000 for local testing.
 const PORT = process.env.PORT || 3000;
 
-// --- 1. THE HOMEPAGE ROUTE ---
-// This fixes the "Cannot GET /" error by serving a simple UI.
+// Helper to run Python Scraper
+const callPython = (mode, url) => {
+    return new Promise((resolve) => {
+        const py = spawn('python3', ['scraper.py', mode, url]);
+        let data = "";
+        py.stdout.on('data', (chunk) => data += chunk.toString());
+        py.on('close', () => resolve(data.trim()));
+    });
+};
+
 app.get('/', (req, res) => {
+    res.send(`<body style="background:#0b0b0b;color:white;font-family:sans-serif;text-align:center;padding:50px;">
+        <h1 style="color:#ffdd95;">ANILAG STREAM</h1>
+        <form action="/watch" method="GET">
+            <input name="url" placeholder="Paste HiAnime URL" style="padding:10px;width:300px;">
+            <button type="submit" style="padding:10px;background:#ffdd95;border:none;">Watch</button>
+        </form>
+    </body>`);
+});
+
+app.get('/watch', async (req, res) => {
+    const url = req.query.url;
+    const episodesJson = await callPython('episodes', url);
+    const episodes = JSON.parse(episodesJson || "[]");
+
     res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Anilag Scraper</title>
-            <style>
-                body { background: #0f0f0f; color: #eee; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-                .container { background: #1a1a1a; padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 90%; max-width: 500px; text-align: center; }
-                h1 { color: #5865F2; margin-bottom: 0.5rem; }
-                p { color: #888; margin-bottom: 2rem; }
-                input { width: 100%; padding: 12px; margin-bottom: 1rem; border: 1px solid #333; background: #2a2a2a; color: white; border-radius: 6px; box-sizing: border-box; }
-                button { background: #5865F2; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: background 0.2s; }
-                button:hover { background: #4752c4; }
-                .footer { margin-top: 2rem; font-size: 0.8rem; color: #444; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>Anilag Stream</h1>
-                <p>Enter an anime page URL to extract the video link.</p>
-                <form action="/api/scrape" method="GET">
-                    <input type="text" name="url" placeholder="https://hianime.to/watch/..." required>
-                    <button type="submit">Extract Video Link</button>
-                </form>
+    <body style="background:#000;color:white;font-family:sans-serif;margin:0;display:flex;">
+        <div style="flex:3;display:flex;flex-direction:column;">
+            <div style="width:100%;aspect-ratio:16/9;background:#111;">
+                <iframe id="v-player" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
             </div>
-            <div class="footer">Status: Online and Ready</div>
-        </body>
-        </html>
-    `);
+            <div style="padding:20px;">
+                <h2 style="color:#ffdd95;">Now Playing</h2>
+                <p>Enjoy your ad-free stream.</p>
+            </div>
+        </div>
+        <div style="flex:1;background:#111;padding:20px;height:100vh;overflow-y:auto;border-left:1px solid #333;">
+            <h3>Episodes</h3>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;">
+                ${episodes.map(ep => `<button onclick="play('${url}')" style="padding:10px;background:#222;color:white;border:none;cursor:pointer;">${ep.number}</button>`).join('')}
+            </div>
+        </div>
+        <script>
+            function play(link) {
+                fetch('/api/link?url=' + encodeURIComponent(link))
+                    .then(r => r.text())
+                    .then(src => document.getElementById('v-player').src = src);
+            }
+            if(${episodes.length} > 0) play('${url}');
+        </script>
+    </body>`);
 });
 
-// --- 2. THE SCRAPER API ROUTE ---
-app.get('/api/scrape', (req, res) => {
-    const targetUrl = req.query.url;
-    
-    if (!targetUrl) {
-        return res.status(400).json({ error: "Missing 'url' parameter" });
-    }
-
-    // Spawn the Python process
-    // Use 'python3' for Linux/Render and '-u' to prevent output buffering
-    const pythonProcess = spawn('python3', ['-u', 'scraper.py', targetUrl]);
-
-    let output = "";
-    let errorOutput = "";
-
-    pythonProcess.stdout.on('data', (data) => {
-        output += data.toString();
-    });
-
-    pythonProcess.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-    });
-
-    pythonProcess.on('close', (code) => {
-        if (code === 0) {
-            // Success! Return the scraped link
-            res.json({
-                success: true,
-                target: targetUrl,
-                data: output.trim()
-            });
-        } else {
-            console.error(`Scraper failed with code ${code}: ${errorOutput}`);
-            res.status(500).json({
-                success: false,
-                error: "Scraper failed to extract link",
-                details: errorOutput
-            });
-        }
-    });
+app.get('/api/link', async (req, res) => {
+    const link = await callPython('video', req.query.url);
+    res.send(link);
 });
 
-// --- 3. START THE SERVER ---
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server is running on port ${PORT}`);
-});
+app.listen(PORT, '0.0.0.0');
