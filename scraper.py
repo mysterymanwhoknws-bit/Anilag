@@ -1,31 +1,43 @@
 import sys
-import asyncio
-from playwright.async_api import async_playwright
+import json
+import yt_dlp
+import requests
+from bs4 import BeautifulSoup
 
-async def scrape_video(url):
-    async with async_playwright() as p:
-        # Launch browser
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+def get_episodes(url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
         
+        # This selector depends on the specific site layout
+        # HiAnime usually lists episodes in a specific div
+        ep_elements = soup.select('.ss-list .ssl-item')
+        episodes = []
+        for ep in ep_elements:
+            episodes.append({
+                "number": ep.get('data-number'),
+                "id": ep.get('data-id'),
+                "title": ep.text.strip()
+            })
+        return episodes
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_video(url):
+    ydl_opts = {'quiet': True, 'format': 'best'}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
-            # 1. Go to the anime page
-            await page.goto(url, wait_until="networkidle")
-
-            # 2. Wait for the player wrapper to appear
-            # Most sites use an ID like 'player-wrapper' or 'iframe-embed'
-            await page.wait_for_selector('iframe', timeout=15000)
-
-            # 3. Get the source of the first iframe (usually the player)
-            iframe = await page.query_selector('iframe')
-            src = await iframe.get_attribute('src')
-
-            print(src)
-        except Exception:
-            print("https://www.youtube.com/embed/dQw4w9WgXcQ") # Fallback error video
-        finally:
-            await browser.close()
+            info = ydl.extract_info(url, download=False)
+            return info.get('url')
+        except Exception as e:
+            return f"Error: {str(e)}"
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        asyncio.run(scrape_video(sys.argv[1]))
+    mode = sys.argv[1] # "video" or "episodes"
+    target = sys.argv[2]
+    
+    if mode == "episodes":
+        print(json.dumps(get_episodes(target)))
+    else:
+        print(get_video(target))
