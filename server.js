@@ -1,64 +1,69 @@
 const express = require('express');
 const { spawn } = require('child_process');
+const axios = require('axios'); // Add this to your package.json!
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Helper to run Python Scraper
-const callPython = (mode, url) => {
-    return new Promise((resolve) => {
-        const py = spawn('python3', ['scraper.py', mode, url]);
-        let data = "";
-        py.stdout.on('data', (chunk) => data += chunk.toString());
-        py.on('close', () => resolve(data.trim()));
-    });
-};
+// 1. HOME PAGE - Shows Top Trending Anime from Jikan API
+app.get('/', async (req, res) => {
+    try {
+        const response = await axios.get('https://api.jikan.moe/v4/top/anime?limit=12');
+        const animeList = response.data.data;
 
-app.get('/', (req, res) => {
-    res.send(`<body style="background:#0b0b0b;color:white;font-family:sans-serif;text-align:center;padding:50px;">
-        <h1 style="color:#ffdd95;">ANILAG STREAM</h1>
-        <form action="/watch" method="GET">
-            <input name="url" placeholder="Paste HiAnime URL" style="padding:10px;width:300px;">
-            <button type="submit" style="padding:10px;background:#ffdd95;border:none;">Watch</button>
-        </form>
-    </body>`);
+        let gridHtml = animeList.map(anime => `
+            <div style="background:#1a1a1a; border-radius:8px; overflow:hidden;">
+                <a href="/watch?url=${encodeURIComponent(anime.url)}" style="text-decoration:none; color:white;">
+                    <img src="${anime.images.jpg.large_image_url}" style="width:100%; height:250px; object-fit:cover;">
+                    <div style="padding:10px; font-size:14px;">${anime.title}</div>
+                </a>
+            </div>
+        `).join('');
+
+        res.send(`
+            <body style="background:#0b0b0b; color:white; font-family:sans-serif; margin:0;">
+                <nav style="padding:20px; background:#111; display:flex; justify-content:space-between; align-items:center;">
+                    <h2 style="color:#ffdd95; margin:0;">ANILAG</h2>
+                    <form action="/search" method="GET">
+                        <input name="q" placeholder="Search anime..." style="background:#222; border:none; color:white; padding:10px; border-radius:5px; width:300px;">
+                    </form>
+                </nav>
+                <div style="padding:40px;">
+                    <h3>Trending Now</h3>
+                    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:20px;">
+                        ${gridHtml}
+                    </div>
+                </div>
+            </body>
+        `);
+    } catch (err) {
+        res.send("Error loading anime. Jikan API might be rate-limiting. Refresh in 1 second.");
+    }
 });
 
+// 2. WATCH PAGE (Same as before, using your scraper.py)
 app.get('/watch', async (req, res) => {
-    const url = req.query.url;
-    const episodesJson = await callPython('episodes', url);
-    const episodes = JSON.parse(episodesJson || "[]");
-
+    const targetUrl = req.query.url;
     res.send(`
-    <body style="background:#000;color:white;font-family:sans-serif;margin:0;display:flex;">
-        <div style="flex:3;display:flex;flex-direction:column;">
-            <div style="width:100%;aspect-ratio:16/9;background:#111;">
-                <iframe id="v-player" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
+        <body style="background:#000; color:white; font-family:sans-serif; margin:0;">
+            <div style="padding:20px;"><a href="/" style="color:#ffdd95; text-decoration:none;">← Back</a></div>
+            <div style="width:100%; max-width:1000px; margin:auto; aspect-ratio:16/9; background:#111;">
+                <iframe id="player" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
             </div>
-            <div style="padding:20px;">
-                <h2 style="color:#ffdd95;">Now Playing</h2>
-                <p>Enjoy your ad-free stream.</p>
-            </div>
-        </div>
-        <div style="flex:1;background:#111;padding:20px;height:100vh;overflow-y:auto;border-left:1px solid #333;">
-            <h3>Episodes</h3>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;">
-                ${episodes.map(ep => `<button onclick="play('${url}')" style="padding:10px;background:#222;color:white;border:none;cursor:pointer;">${ep.number}</button>`).join('')}
-            </div>
-        </div>
-        <script>
-            function play(link) {
-                fetch('/api/link?url=' + encodeURIComponent(link))
+            <script>
+                fetch('/api/link?url=${encodeURIComponent(targetUrl)}')
                     .then(r => r.text())
-                    .then(src => document.getElementById('v-player').src = src);
-            }
-            if(${episodes.length} > 0) play('${url}');
-        </script>
-    </body>`);
+                    .then(link => document.getElementById('player').src = link);
+            </script>
+        </body>
+    `);
 });
 
-app.get('/api/link', async (req, res) => {
-    const link = await callPython('video', req.query.url);
-    res.send(link);
+// 3. API FOR SCRAPER
+app.get('/api/link', (req, res) => {
+    const py = spawn('python3', ['scraper.py', 'video', req.query.url]);
+    let output = "";
+    py.stdout.on('data', (d) => output += d.toString());
+    py.on('close', () => res.send(output.trim()));
 });
 
 app.listen(PORT, '0.0.0.0');
